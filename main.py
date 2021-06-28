@@ -12,14 +12,13 @@ from time import time
 import json
 from hashlib import sha256
 from uuid import uuid4
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 
 # Transaction class
 @dataclass(frozen=True)
 class Transaction:
     """Class for immutable transaction details."""
-    # TODO: implement input type checks
     sender: str
     recipient: str
     amount: float
@@ -29,12 +28,18 @@ class Transaction:
 @dataclass(frozen=True)
 class Block:
     """Immutable class representing each block in a blockchain."""
-    # TODO: implement input type checks
     index: int
     timestamp: float
     transactions: Optional[Tuple[Transaction]]
     proof: int
     previous_hash: Optional[str]
+
+    def show(self) -> OrderedDict:
+        return asdict(self, dict_factory=OrderedDict)
+
+    # TODO: make transactions a property so that when it is accessed it is
+    # shown as a tuple of dictionaries. ---> i.e. key-value pairs shown when
+    # jsonified.
 
 
 # Blockchain class
@@ -137,8 +142,7 @@ class Blockchain:
     def show_chain(self) -> List[Dict[str, Any]]:
         """Output entire Blockchain with Blocks as dictionaries.
         Intended for json outputs."""
-        return [asdict(block, dict_factory=OrderedDict)
-                for block in self._chain]
+        return [block.show() for block in self._chain]
 
 
 def create_blockchain_application() -> Flask:
@@ -153,12 +157,39 @@ def create_blockchain_application() -> Flask:
     node_id = str(uuid4()).replace('-', '')
 
     @app.route('/mine', methods=['GET'])
-    def mine() -> str:
-        return "We'll mine a new block."
+    def mine() -> [str, int]:
+        last_block = blockchain.last_block
+        last_proof = last_block.proof
+        proof = blockchain.proof_of_work(last_proof)
+
+        # Add reward for current miner to the transactions
+        blockchain.new_transaction(
+            sender='0',
+            recipient=node_id,
+            amount=1,
+        )
+
+        # Mine new block
+        new_block = blockchain.new_block(proof)
+        response = {
+            'message': f'Block {new_block.index} mined.',
+            'index': new_block.index,
+            'transactions': new_block.show()['transactions'],
+            'reward': 1,
+        }
+        return jsonify(response), 200
 
     @app.route('/transactions/new', methods=['POST'])
-    def new_transaction() -> str:
-        return "We'll add a new transaction."
+    def new_transaction() -> [str, int]:
+        keys = request.form.keys()
+        if set(keys) != {'sender', 'recipient', 'amount'}:
+            return "Invalid data.", 400
+        else:
+            index = blockchain.new_transaction(**request.form)
+            response = {
+                'message': f'Transaction will be added to block {index}',
+            }
+            return jsonify(response), 201
 
     @app.route('/chain', methods=['GET'])
     def full_chain() -> [str, int]:
@@ -168,7 +199,9 @@ def create_blockchain_application() -> Flask:
         }
         return jsonify(response), 200
 
-    app.run(host='0.0.0.0', port=5000)
+    app.run(
+        port=5000,
+    )
 
     return app
 
