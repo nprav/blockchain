@@ -34,12 +34,72 @@ class Block:
     proof: int
     previous_hash: Optional[str]
 
-    def show(self) -> OrderedDict:
+    def dict(self) -> OrderedDict:
+        """Convert Frozen dataclass into an Ordered Dict ---> makes it json
+        serializable. The method also recursively converts any Transaction
+        objects."""
         return asdict(self, dict_factory=OrderedDict)
+
+    def hash(self) -> str:
+        """Hash method to hash a block and return a str."""
+        block_str = json.dumps(self.dict()).encode()
+        return sha256(block_str).hexdigest()
 
     # TODO: make transactions a property so that when it is accessed it is
     # shown as a tuple of dictionaries. ---> i.e. key-value pairs shown when
     # jsonified.
+
+
+# Proof of Work Funtions
+def proof_of_work(last_proof: int) -> int:
+    """Simple Proof of Work algorithm.:
+        -   Find a number p' such that hash(p*p') contains 4 leading 0s
+            where p is the previous p'.
+        -   p is the previous proof, and p' is the new proof.
+
+    Parameters
+    ----------
+    last_proof: int
+                Previous proof
+
+    Returns
+    -------
+    proof:  int
+            Next proof.
+    """
+    proof = 0
+    while not valid_proof(last_proof, proof):
+        proof += 1
+    return proof
+
+
+def valid_proof(last_proof: int, proof: int):
+    """Validate the proof. I.e. does hash(last_proof, proof) contain
+    4 leading zeros.
+
+    Parameters
+    ----------
+    last_proof: int
+                Previous proof
+    proof:      int
+                Current proof
+
+    Returns
+    -------
+    bool        True if correct proof, False if not.
+    """
+    guess_utf = f'{last_proof}{proof}'.encode()
+    guess_hash = sha256(guess_utf).hexdigest()
+    return guess_hash[:4] == "0000"
+
+
+# Custom Exceptions
+class InvalidProofError(Exception):
+    """Raised when a block mining has been attempted with an invalid proof."""
+    def __init__(self, last_proof, proof):
+        message = "The proof is invalid. hash(last_proof, proof)" \
+                  " does not end with 4 0's."
+        super().__init__(message)
 
 
 # Blockchain class
@@ -58,95 +118,47 @@ class Blockchain:
         )
         self._chain: List[Block] = [genesis_block]
 
-    def new_block(self, proof: int) -> Block:
-        """Creates a new block and adds it to the chain."""
-        self._chain.append(Block(
-            index=len(self),
-            timestamp=time(),
-            transactions=tuple(self.unconfirmed_transactions),
-            proof=proof,
-            previous_hash=self.hash(self._chain[-1]),
-        ))
-        self.unconfirmed_transactions = []
+    @property
+    def last_block(self) -> Block:
+        """Get the most recent mined block (last on chain)"""
         return self._chain[-1]
 
     def new_transaction(self, sender: str, recipient: str,
                         amount: float) -> int:
         """Adds a new transactions to the list of transactions.
-        Returns the index of the block that will contains the transaction."""
+        Returns the index of the block that will contain the transaction."""
         self.unconfirmed_transactions.append(Transaction(
             sender, recipient, amount,
         ))
         return len(self._chain)
+
+    def new_block(self, proof: int) -> Block:
+        """Creates a new block and adds it to the chain."""
+        if not valid_proof(self.last_block.proof, proof):
+            raise InvalidProofError(self.last_block.proof, proof)
+        self._chain.append(Block(
+            index=len(self),
+            timestamp=time(),
+            transactions=tuple(self.unconfirmed_transactions),
+            proof=proof,
+            previous_hash=self._chain[-1].hash(),
+        ))
+        self.unconfirmed_transactions: List[Transaction] = []
+        return self._chain[-1]
+
+    def list_of_dicts(self) -> List[Dict[str, Any]]:
+        """Output entire Blockchain as a list of Blocks as dictionaries.
+        Intended for json outputs."""
+        return [block.dict() for block in self._chain]
 
     def __len__(self) -> int:
         """Length of blockchain (i.e. total number of blocks, including the
         genesis block."""
         return len(self._chain)
 
-    @staticmethod
-    def hash(block: Block) -> str:
-        """Hash method to hash a block and return a str.
-        """
-        block_str = json.dumps(
-            asdict(block, dict_factory=OrderedDict)
-        ).encode()
-        return sha256(block_str).hexdigest()
-
-    @property
-    def last_block(self) -> Block:
-        """Get the most recent mined block (last on chain)"""
-        return self._chain[-1]
-
-    def proof_of_work(self, last_proof: int) -> int:
-        """Simple Proof of Work algorithm.:
-            -   Find a number p' such that hash(p*p') contains 4 leading 0s
-                where p is the previous p'.
-            -   p is the previous proof, and p' is the new proof.
-
-        Parameters
-        ----------
-        last_proof: int
-                    Previous proof
-
-        Returns
-        -------
-        proof:  int
-                Next proof.
-        """
-        proof = 0
-        while not self.valid_proof(last_proof, proof):
-            proof += 1
-        return proof
-
-    @staticmethod
-    def valid_proof(last_proof: int, proof: int):
-        """Validate the proof. I.e. does hash(last_proof, proof) contain
-        4 leading zeros.
-
-        Parameters
-        ----------
-        last_proof: int
-                    Previous proof
-        proof:      int
-                    Current proof
-
-        Returns
-        -------
-        bool        True if correct proof, False if not.
-        """
-        guess_utf = f'{last_proof}{proof}'.encode()
-        guess_hash = sha256(guess_utf).hexdigest()
-        return guess_hash[:4] == "0000"
-
-    def show_chain(self) -> List[Dict[str, Any]]:
-        """Output entire Blockchain with Blocks as dictionaries.
-        Intended for json outputs."""
-        return [block.show() for block in self._chain]
-
 
 def create_blockchain_application() -> Flask:
-    """FUnction that contains the networking setup for the
+    """Function that contains the networking setup for the
     Blockchain"""
 
     # Flask app instantation
@@ -160,7 +172,7 @@ def create_blockchain_application() -> Flask:
     def mine() -> [str, int]:
         last_block = blockchain.last_block
         last_proof = last_block.proof
-        proof = blockchain.proof_of_work(last_proof)
+        proof = proof_of_work(last_proof)
 
         # Add reward for current miner to the transactions
         blockchain.new_transaction(
@@ -174,7 +186,7 @@ def create_blockchain_application() -> Flask:
         response = {
             'message': f'Block {new_block.index} mined.',
             'index': new_block.index,
-            'transactions': new_block.show()['transactions'],
+            'transactions': new_block.dict()['transactions'],
             'reward': 1,
         }
         return jsonify(response), 200
@@ -194,7 +206,7 @@ def create_blockchain_application() -> Flask:
     @app.route('/chain', methods=['GET'])
     def full_chain() -> [str, int]:
         response = {
-            'chain': blockchain.show_chain(),
+            'chain': blockchain.list_of_dicts(),
             'length': len(blockchain),
         }
         return jsonify(response), 200
@@ -217,15 +229,15 @@ if __name__ == '__main__':
     test_chain = Blockchain()
     test_chain.new_transaction('test', 'test', 3)
     print(test_chain.unconfirmed_transactions)
-    test_chain.new_block(4)
+    test_chain.new_block(proof_of_work(test_chain.last_block.proof))
     print(test_chain.unconfirmed_transactions)
-    print(test_chain.show_chain())
+    print(test_chain.list_of_dicts())
     print(test_chain.last_block)
-    print(test_chain.hash(test_chain.last_block))
+    print(test_chain.last_block.hash())
     dump = json.dumps(asdict(test_chain.last_block))
     print(dump)
     print(json.loads(dump))
-    print(test_chain.proof_of_work(test_chain.last_block.proof))
+    print(proof_of_work(test_chain.last_block.proof))
 
     # Main Flask Functions
     app = create_blockchain_application()
