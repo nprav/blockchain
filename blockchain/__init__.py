@@ -11,13 +11,13 @@ from uuid import uuid4
 from flask import Flask, jsonify, request, Response
 
 # Local application imports
-from internals import BlockchainNetwork, Blockchain, Transaction, \
+from blockchain.internals import BlockchainNode, Blockchain, Transaction, \
     proof_of_work, valid_chain
 
 
 def create_blockchain_application() -> Flask:
     """Function that contains the networking setup for the
-    Blockchain"""
+    Blockchain. Handles the Blockchain and Blockchain network."""
 
     # Flask app instantation
     app = Flask(__name__)
@@ -25,7 +25,7 @@ def create_blockchain_application() -> Flask:
 
     # Globally unique address for node
     node_id = str(uuid4()).replace('-', '')
-    network = BlockchainNetwork(node_id, blockchain)
+    network = BlockchainNode(node_id, blockchain)
 
     @app.route('/', methods=['GET'])
     def main_page() -> str:
@@ -44,9 +44,7 @@ def create_blockchain_application() -> Flask:
                     miner.
         int         HTTP response code.
         """
-        last_block = blockchain.last_block
-        last_proof = last_block.proof
-        proof = proof_of_work(last_proof)
+        proof = proof_of_work(blockchain.last_block.proof)
 
         # Add reward for current miner to the transactions
         blockchain.new_transaction(
@@ -82,6 +80,7 @@ def create_blockchain_application() -> Flask:
             }
             code = 400
         else:
+            # TODO: Handle exceptions raised by Blockchain
             index = blockchain.new_transaction(**request.form)
             response = {
                 'message': f'Transaction will be added to block {index}',
@@ -107,7 +106,23 @@ def create_blockchain_application() -> Flask:
 
     @app.route('/nodes/register', methods=['POST'])
     def new_nodes() -> [Response, int]:
-        return "New nodes have been added to the Blockchain network."
+        try:
+            nodes = request.form['nodes']
+        except KeyError:
+            return "Error: No new nodes have been provided."
+
+        if nodes is None:
+            return "Error: No new nodes have been provided."
+
+        for node in nodes:
+            network.register_node(node)
+
+        response = {
+            'message': 'New nodes have been added.',
+            'total_nodes': list(network.nodes),
+        }
+
+        return jsonify(response), 200
 
     @app.route('/nodes/resolve', methods=['GET'])
     def resolve_conflicts() -> [Response, int]:
@@ -139,7 +154,7 @@ if __name__ == '__main__':
 
     # Main Flask Functions
     app = create_blockchain_application()
-    # app.run(
-    #     port=5000,
-    # )
+    app.run(
+        port=5000,
+    )
 
