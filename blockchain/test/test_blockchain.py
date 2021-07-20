@@ -3,6 +3,7 @@
 # Standard library imports
 from pprint import pprint
 from dataclasses import FrozenInstanceError
+import json
 
 # Third party imports
 import pytest
@@ -12,10 +13,15 @@ from blockchain.internals import *
 
 
 class TestTransaction:
+
     def test_frozen(self):
         t = Transaction(sender='a', recipient='b', amount=10)
         with pytest.raises(FrozenInstanceError):
             t.sender = 'c'
+
+    def test_str_amount(self):
+        t = Transaction(sender='a', recipient='b', amount='39')
+        assert type(t.amount) == float
 
 
 class TestBlock:
@@ -34,8 +40,9 @@ class TestBlock:
 
     def test_from_dict(self, block):
         pprint(block)
-        block_dict = block.dict()
-        pprint(block_dict)
+        block_json = json.dumps(block.dict())
+        pprint(block_json)
+        block_dict = json.loads(block_json)
         new_block = Block.from_dict(block_dict)
         pprint(new_block)
         assert block == new_block
@@ -122,8 +129,7 @@ class TestBlockchain:
         chain_lst = chain1.list_of_dicts()
         chain_lst[-1]['index'] = 0
         pprint(chain_lst)
-        with pytest.raises(InvalidBlockchainError):
-            Blockchain.from_list_of_dicts(chain_lst)
+        assert not Blockchain.from_list_of_dicts(chain_lst).is_valid()
 
 
 class TestNode:

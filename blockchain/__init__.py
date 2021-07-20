@@ -125,8 +125,21 @@ def create_blockchain_application() -> Flask:
         return jsonify(response), 200
 
     @app.route('/nodes/resolve', methods=['GET'])
-    def resolve_conflicts() -> [Response, int]:
-        return "Conflicts between nodes resolved via consensus algorithm."
+    def consensus() -> [Response, int]:
+        replaced = network.resolve_conflicts()
+
+        if replaced:
+            response = {
+                'message': 'Chain was replaced.',
+                'new_chain': blockchain.list_of_dicts(),
+            }
+
+        else:
+            response = {
+                'message': 'Chain is authoritative.',
+                'chain': blockchain.list_of_dicts(),
+            }
+        return jsonify(response), 200
 
     return app
 
@@ -135,6 +148,8 @@ if __name__ == '__main__':
 
     # Test Functions
     test_transaction = Transaction("sender", recipient="rec", amount=3)
+    test_transaction2 = Transaction("sender", recipient="rec", amount='3')
+    print(test_transaction)
     print(test_transaction)
     print(type(test_transaction))
 

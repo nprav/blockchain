@@ -5,7 +5,7 @@
 #   https://hackernoon.com/learn-blockchains-by-building-one-117428612f46
 
 # Standard library imports
-from typing import Tuple, List, Optional, Dict, Any, Set, Callable, Collection
+from typing import Tuple, List, Optional, Dict, Any, Set, Callable
 from collections import OrderedDict
 from dataclasses import dataclass, asdict
 from time import time
@@ -13,6 +13,11 @@ import json
 from hashlib import sha256
 from urllib.parse import urlparse
 import requests
+
+
+# Type aliases
+RawBlock = Dict[str, Any]
+RawBlockchain = List[RawBlock]
 
 
 # Proof of work functions
@@ -45,9 +50,10 @@ def proof_of_work(
 
     Parameters
     ----------
-    valid_proof:    func
-    last_proof: int
-                Previous proof
+    valid_proof:    Callable[[int, int], bool]
+                    Function defining a valid proof.
+    last_proof:     int
+                    Previous proof
 
     Returns
     -------
@@ -94,6 +100,43 @@ def valid_chain(
     return True
 
 
+def get_blockchain_from_node(
+        node: str,
+        valid_proof: Callable[[int, int], bool] = valid_four_zeros_proof,
+    ) -> Optional['Blockchain']:
+    """Generate a blockchain object by sending an HTTP request to a node.
+    Returns a blockchain object upon a sucessful request. The blockchain may or
+    may not be valid.
+
+    Parameters
+    ----------
+    node:           str
+                    Node address.
+    valid_proof:    Callable[[int, int], bool]
+                    Function defining a valid proof.
+
+    Returns
+    -------
+    Optional[Blockchain]:   Either returns a Blockchain or None if the HTTP
+                            request is unsuccessful.
+    """
+    response = requests.get(fr"http://{node}/chain")
+
+    # Successful response:
+    if response.status_code == 200:
+        raw_chain = response.json()['chain']
+
+    # Unsuccessful response
+    else:
+        # TODO: Add Handling logic. Eg. if the address is not a valid
+        #   node or trying multiple times.
+        return None
+
+    # Convert from raw format to Blockchain object
+    chain = Blockchain.from_list_of_dicts(raw_chain, valid_proof)
+    return chain
+
+
 # Transaction class
 @dataclass(frozen=True)
 class Transaction:
@@ -101,6 +144,9 @@ class Transaction:
     sender: str
     recipient: str
     amount: float
+
+    def __post_init__(self):
+        super().__setattr__('amount', float(self.amount))
 
 
 # Block class
@@ -113,7 +159,7 @@ class Block:
     previous_hash: Optional[str] = None
     transactions: Optional[Tuple[Transaction]] = None
 
-    def dict(self) -> OrderedDict:
+    def dict(self) -> RawBlock:
         """Convert Frozen dataclass into an Ordered Dict ---> makes it json
         serializable. The method also recursively converts any Transaction
         objects."""
@@ -125,7 +171,7 @@ class Block:
         return sha256(block_str).hexdigest()
 
     @classmethod
-    def from_dict(cls, block_dict: Dict) -> 'Block':
+    def from_dict(cls, block_dict: RawBlock) -> 'Block':
         """Make a Block from a dictionary of values. Assumes the Transactions
          are also in dictionary format. Useful when building a
         Block from json outputs.
@@ -231,7 +277,7 @@ class Blockchain:
             return True
         return False
 
-    def list_of_dicts(self) -> List[Dict[str, Any]]:
+    def list_of_dicts(self) -> RawBlockchain:
         """Output entire Blockchain as a list of Blocks as dictionaries.
         Intended for json outputs."""
         return [block.dict() for block in self._chain]
@@ -256,19 +302,18 @@ class Blockchain:
 
     @classmethod
     def from_list_of_dicts(
-            cls, chain_lst: List[Dict[str, Any]],
+            cls, chain_lst: RawBlockchain,
             valid_proof: Callable[[int, int], bool] = valid_four_zeros_proof,
     ) -> 'Blockchain':
         """Creates a Blockchain from a list of dictionaries (typical json
-        format). Raises an InvalidBlockchainError if the chain is invalid."""
+        format). Blockchain may be valid or invalid."""
         new_blockchain = cls(valid_proof=valid_proof)
         new_blockchain._chain = [
             Block.from_dict(block_dict) for block_dict in chain_lst
         ]
-        if new_blockchain.is_valid():
-            return new_blockchain
-        else:
-            raise InvalidBlockchainError(new_blockchain)
+        if not new_blockchain.is_valid():
+            print("Blockchain is invalid with given proof function.")
+        return new_blockchain
 
 
 # Class dealing with network interactions for Blockchain
@@ -280,6 +325,7 @@ class BlockchainNode:
         self.node: str = node
         self._nodes: Set[str] = {self.node}
         self.blockchain: Blockchain = blockchain
+        self.valid_proof = self.blockchain.valid_proof
 
     @property
     def nodes(self):
@@ -290,23 +336,27 @@ class BlockchainNode:
         # TODO: check node validity
         self._nodes.add(urlparse(address).netloc)
 
-    def resolve_conflicts(self):
-        pass
+    def resolve_conflicts(self) -> bool:
+        """Check all neighbor nodes and resolve any conflicts (reach consensus)
+        by converting to the current blockchain to the longest valid chain."""
 
-    @staticmethod
-    def get_raw_blockchain_from_node(node: str) -> Optional[Blockchain]:
-        response = requests.get(fr"http://{node}/chain")
+        # Get blockchains from all nodes
+        neighbor_blockchains = [
+            self.get_blockchain_from_node(node) for node in self.nodes
+        ]
 
-        # Successful response:
-        if response.status_code == 200:
-            raw_chain = response.json()['chain']
-            return raw_chain
+        # Filter out any chains that are None due to invalid HTTP requests.
+        neighbor_blockchains = [
+            chain for chain in neighbor_blockchains if chain is not None
+        ]
 
-        # Unsuccessful response
-        else:
-            # TODO: Add Handling logic. Eg. if the address is not a valid
-            #   node, then remove from nodes list. Otherwise, try again later.
-            return None
+        # Resolve conflicts
+        return self.blockchain.resolve_chain_conflict(neighbor_blockchains)
+
+    def get_blockchain_from_node(self, node: str) -> Optional[Blockchain]:
+        """Returns blockchain object from given node."""
+        # TODO: Handle case of invalid blockchains or no node response.
+        return get_blockchain_from_node(node, self.valid_proof)
 
 
 # Custom Exceptions
