@@ -6,6 +6,7 @@
 
 # Standard library imports
 from uuid import uuid4
+import json
 
 # Third party imports
 from flask import Flask, jsonify, request, Response
@@ -107,20 +108,25 @@ def create_blockchain_application() -> Flask:
     @app.route('/nodes/register', methods=['POST'])
     def new_nodes() -> [Response, int]:
         try:
-            nodes = request.form['nodes']
+            raw_data = request.get_json()
+            nodes = raw_data.get('nodes')
         except KeyError:
             return "Error: No new nodes have been provided."
 
         if nodes is None:
             return "Error: No new nodes have been provided."
 
+        num_nodes = len(network.nodes)
         for node in nodes:
-            network.register_node(node)
+            if node is not "":
+                network.register_node(node)
 
         response = {
             'message': 'New nodes have been added.',
             'total_nodes': list(network.nodes),
         }
+        if len(network.nodes) == num_nodes:
+            response['message'] = 'No new nodes have been added.'
 
         return jsonify(response), 200
 

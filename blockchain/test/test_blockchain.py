@@ -117,6 +117,11 @@ class TestBlockchain:
         assert res3 is False
         assert len(chain_lst[1]) == 2
 
+        # Test empty chain resolving conflicts
+        res4 = chain_lst[-1].resolve_chain_conflict([])
+        assert res4 is False
+        assert len(chain_lst[-1]) == len(chain_lst)
+
     def test_from_list_of_dicts(self, chain1):
         print(chain1)
         chain_lst = chain1.list_of_dicts()

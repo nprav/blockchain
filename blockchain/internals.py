@@ -120,7 +120,11 @@ def get_blockchain_from_node(
     Optional[Blockchain]:   Either returns a Blockchain or None if the HTTP
                             request is unsuccessful.
     """
-    response = requests.get(fr"http://{node}/chain")
+    print(node)
+    try:
+        response = requests.get(fr"http://{node}/chain", timeout=0.01)
+    except requests.exceptions.RequestException:
+        raise NodeConnectionError(node)
 
     # Successful response:
     if response.status_code == 200:
@@ -130,7 +134,7 @@ def get_blockchain_from_node(
     else:
         # TODO: Add Handling logic. Eg. if the address is not a valid
         #   node or trying multiple times.
-        return None
+        raise NodeConnectionError(node)
 
     # Convert from raw format to Blockchain object
     chain = Blockchain.from_list_of_dicts(raw_chain, valid_proof)
@@ -322,8 +326,8 @@ class BlockchainNode:
      including keeping track of all server nodes holding the blockchain."""
 
     def __init__(self, node: str, blockchain: Blockchain):
-        self.node: str = node
-        self._nodes: Set[str] = {self.node}
+        self.node_id: str = node
+        self._nodes: Set[str] = set()
         self.blockchain: Blockchain = blockchain
         self.valid_proof = self.blockchain.valid_proof
 
@@ -355,8 +359,13 @@ class BlockchainNode:
 
     def get_blockchain_from_node(self, node: str) -> Optional[Blockchain]:
         """Returns blockchain object from given node."""
-        # TODO: Handle case of invalid blockchains or no node response.
-        return get_blockchain_from_node(node, self.valid_proof)
+        try:
+            blockchain = get_blockchain_from_node(node, self.valid_proof)
+        except NodeConnectionError:
+            # TODO: Handle cases of multiple errors with nodes.
+            blockchain = None
+
+        return blockchain
 
 
 # Custom Exceptions
@@ -378,4 +387,14 @@ class InvalidBlockchainError(Exception):
         super().__init__(message)
 
         # TODO: Add information about why Blockchain is invalid
+
+
+class NodeConnectionError(Exception):
+    """Raised when there is an error connecting to a neighbour blockchain
+    node."""
+
+    def __init__(self, node: str):
+        print("Connection Failure.")
+        message = f"HTTP error. Unable to connect to {node}."
+        super().__init__(message)
 
